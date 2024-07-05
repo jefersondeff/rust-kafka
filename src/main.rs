@@ -1,38 +1,36 @@
-use kafka::consumer::{Consumer, FetchOffset};
-use std::str;
-///Create consumer
+use consumer::MyConsumer;
+use producer::MyProducer;
+use text::Texs;
+
+mod consumer;
+mod producer;
+mod text;
+
 fn main() {
-    let hosts = vec!["localhost:29092".to_owned()];
-    let mut consumer = match Consumer::from_hosts(hosts)
-        .with_topic("topic-name".to_owned())
-        .with_fallback_offset(FetchOffset::Latest)
-        .create()
-    {
-        Ok(consumer) => consumer,
-        Err(e) => {
-            eprintln!("Erro ao criar consumer: {}", e);
-            return;
-        }
-    };
+    let hosts = vec!["localhost:9092".to_string()];
+    let mut texts = Texs::new();
+    let mut consumer = MyConsumer::new(hosts.clone(), "actions".to_string());
+    let mut producer = MyProducer::new(hosts);
+
+    println!("Started...");
 
     loop {
-        match consumer.poll() {
-            Ok(message_sets) => {
-                for ms in message_sets.iter() {
-                    for m in ms.messages() {
-                        println!("{:?}", str::from_utf8(m.value).unwrap());
-                    }
-                    if let Err(e) = consumer.consume_messageset(ms) {
-                        println!("Falied consumed mensagen set: {}", e)
-                    };
+        for ms in consumer.consume_events().iter() {
+            for m in ms.messages() {
+                let event_data = MyConsumer::get_event_data(m);
+                let action = event_data["action"].to_string();
+                if action == "\"add\"" {
+                    texts.add_text(event_data["value"].to_string());
+                } else if action == "\"remove\"" {
+                    let index = event_data["value"].to_string().parse::<usize>().unwrap();
+                    texts.remove_text(index)
+                } else {
+                    println!("Invalid action");
                 }
-                if let Err(e) = consumer.commit_consumed() {
-                    println!("Failed to commit consumed messages: {}", e)
-                };
+                producer.send_data_to_topic("texts", texts.to_json());
             }
-            Err(e) => {
-                eprintln!("Failed to poll messages: {}", e)
-            }
+            consumer.consume_messagetset(ms);
         }
+        consumer.commit_consumed();
     }
 }
